@@ -1,10 +1,10 @@
 import { Listener } from './types';
 
-export class EventEmitter {
+class EventEmitter {
   private events: { [key: string]: Listener } = {};
 
   public on(event: string, listener: Listener): void {
-    if ({}.toString.call(listener) !== '[object Function]')
+    if (typeof listener !== 'function')
       return console.log('Listener should be a function');
     this.events[event] = listener;
   }
@@ -17,4 +17,12 @@ export class EventEmitter {
   public removeEvents(): void {
     this.events = {};
   }
+}
+
+export function getEmitter(): any {
+  if (!global || !(global as any).cws || !(global as any).cws.EventEmitter) {
+    return EventEmitter;
+  }
+
+  return (global as any).cws.EventEmitter;
 }

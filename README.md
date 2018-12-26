@@ -1,14 +1,15 @@
-<h1 align="center">ClusterWS/uWS Implementation</h1>
-<h6 align="center">Modified version of <a href="https://github.com/uNetworking/uWebSockets">uWebSockets</a></h6>
+<h1 align="center">ClusterWS/cWS Implementation</h1>
+<h6 align="center">Modified version of <a href="https://github.com/uNetworking/uWebSockets/tree/v0.14">uWebSockets</a></h6>
 
 <p align="center">
  <img src="https://cdn.rawgit.com/goriunov/159120ca6a883d8d4e75543ec395d361/raw/d22028ecc726d7d3cc30a2a85cc7cc454b0afada/clusterws.svg" width="450">
 </p>
 
+<i>This module is modified version of the uWebSockets with some minor tweaks in C++ code and complete rewrite of JS code to TS. Original software is available in <a href="https://github.com/uNetworking/uWebSockets/tree/v0.14">uWebSockets</a> repository.</i>
 
-<i>This module is modified version of the uWebSockets with some minor tweaks in C++ code and complete rewrite of JS code to TS. Original software is available in <a href="https://github.com/uNetworking/uWebSockets">uWebSockets</a> repository.</i>
+<a href="https://badge.fury.io/js/%40clusterws%2Fcws"><img src="https://badge.fury.io/js/%40clusterws%2Fcws.svg" alt="npm version" height="22"></a>
 
-This repository is based on the <a href="https://github.com/uNetworking/uWebSockets">uWebSockets</a> therefore has two licence [ClusterWS MIT](https://github.com/ClusterWS/uWS/blob/master/LICENSE) and [Alex Hultman ZLIB](https://github.com/ClusterWS/uWS/blob/master/src/LICENSE).
+This repository is based on the <a href="https://github.com/uNetworking/uWebSockets/tree/v0.14">uWebSockets</a> therefore has two licence [ClusterWS MIT](https://github.com/ClusterWS/uWS/blob/master/LICENSE) and [Alex Hultman ZLIB](https://github.com/ClusterWS/uWS/blob/master/src/LICENSE).
 
 Big thanks to [SirAnthony](https://github.com/SirAnthony) for ssl workaround (has been taken from [SirAnthony's uWebSockets fork](https://github.com/hola/uWebSockets-bindings)).
 
@@ -16,21 +17,17 @@ Big thanks to [SirAnthony](https://github.com/SirAnthony) for ssl workaround (ha
 - [Become a Backer on Patreon](https://www.patreon.com/clusterws) 
 - [One time Donation via PayPal](https://www.paypal.me/goriunov)
 
-
-
 ### Installation
 
 ```js
-npm i @clusterws/uws
+npm i @clusterws/cws
 ```
 
 ### Server example
 
-uWebSockets node was designed to mimic node js [ws](https://github.com/websockets/ws) module there are some things which are not available in uWebSockets.
-
 ```js
 // use WebSocketServer to create server
-const { WebSocketServer } = require('@clusterws/uws');
+const { WebSocketServer } = require('@clusterws/cws');
 
 // Create websocket server 
 const server = new WebSocketServer({ port: 3000 }, () => {
@@ -72,6 +69,11 @@ server.on('connection', (socket, upgReq) => {
     socket.ping()
 });
 
+server.on('error', (err, socket) => {
+  // in some cases there is not socket param
+  // handle http errors, TLS errors, ... 
+})
+
 // Start auto ping (second parameter is type of ping `false` is low level)
 // use `false` most of the time except if you want to track ping pong on the client side 
 // which does not have onping & onpong methods (like browser websocket)
@@ -95,7 +97,7 @@ server.close(callback)
 ```js
 // Client part is pretty much the same as in server
 // use WebSocket to create client
-const { WebSocket } = require('@clusterws/uws');
+const { WebSocket } = require('@clusterws/cws');
 
 const socket = new WebSocket('ws://url:port');
 
@@ -127,6 +129,17 @@ socket.close(code, reason) // close connection
 
 ```
 
+### Replace EventEmitter 
+To replace custom event emitter you have to overwrite global `cws` parameter before importing `@clusterws/cws` ex:
+```js
+// this code uses default node js event emitter
+global.cws = {
+  EventEmitter: require('events').EventEmitter
+}
+
+// import cws
+const { WebSocket } = require('@clusterws/cws');
+```
 
 ### Handle AppLevelPing In Browser Example
 This is just an example of handling app level ping pong from the client side which does not have `onping` and `onpong` methods available 

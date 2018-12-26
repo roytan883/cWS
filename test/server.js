@@ -1,6 +1,12 @@
-const uws = require('../dist/index');
+// global.EventEmitter = require('events').EventEmitter;
 
-let server = new uws.WebSocketServer({
+global.cws = {
+  EventEmitter: require('events').EventEmitter
+}
+// console.log(global.EventEmitter);
+const cws = require('../dist/index');
+
+let server = new cws.WebSocketServer({
   port: 3000, verifyClient: (info, next) => {
     console.log(info.headers)
     next(true);
@@ -11,7 +17,7 @@ let server = new uws.WebSocketServer({
 
 server.on('connection', (socket) => {
   console.log('new conneteion');
-  socket.on('message', (message) => {
+  socket.on('message', async (message) => {
     console.log(message);
     // socket.send('Hi back');
     // socket.send(message);

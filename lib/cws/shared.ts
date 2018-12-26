@@ -1,5 +1,5 @@
 // tslint:disable-next-line
-export const native: any = require(`./uws_${process.platform}_${process.versions.modules}`);
+export const native: any = require(`./cws_${process.platform}_${process.versions.modules}`);
 
 export const OPCODE_TEXT: number = 1;
 export const OPCODE_PING: number = 9;
@@ -12,7 +12,3 @@ export const DEFAULT_PAYLOAD_LIMIT: number = 16777216;
 
 // tslint:disable-next-line
 export const noop: any = (): void => { };
-
-// this is how pong code looks like (just for reference as all logic is handled in c++)
-// export const APP_PONG_CODE: number = Buffer.from('A')[0];
-// export const OPCODE_PONG: number = 10;

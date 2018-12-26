@@ -4,13 +4,13 @@ import * as HTTPS from 'https';
 import { Socket } from 'net';
 import { TLSSocket } from 'tls';
 import { WebSocket } from './client';
-import { EventEmitter } from '../emitter';
+import { getEmitter } from '../emitter';
 import { Listener, ServerConfigs, BroadcastOptions, ConnectionInfo } from '../types';
 import { native, noop, APP_PING_CODE, PERMESSAGE_DEFLATE, SLIDING_DEFLATE_WINDOW, DEFAULT_PAYLOAD_LIMIT } from './shared';
 
 native.setNoop(noop);
 
-export class WebSocketServer extends EventEmitter {
+export class WebSocketServer extends getEmitter() {
   private noDelay: boolean;
   private httpServer: HTTP.Server | HTTPS.Server;
   private upgradeReq: HTTP.IncomingMessage;
@@ -34,6 +34,7 @@ export class WebSocketServer extends EventEmitter {
 
   // overload on function from super class
   public on(event: string, listener: Listener): void;
+  public on(event: 'error', listener: (err: Error, socket?: Socket) => void): void;
   public on(event: 'connection', listener: (socket: WebSocket) => void): void;
   public on(event: string, listener: Listener): void {
     super.on(event, listener);
@@ -64,7 +65,7 @@ export class WebSocketServer extends EventEmitter {
       this.serverGroup = null;
     }
 
-    if (callback) setTimeout(callback, 20000);
+    callback && callback();
   }
 
   private start(configs: ServerConfigs, callback: Listener): void {
@@ -79,6 +80,10 @@ export class WebSocketServer extends EventEmitter {
     this.serverIsProvided = !!configs.server;
     this.httpServer = configs.server || HTTP.createServer((_: any, response: HTTP.ServerResponse) => response.end());
     this.upgradeListener = (req: HTTP.IncomingMessage, socket: Socket): void => {
+      socket.on('error', (err: Error) => this.emit('error', err, socket));
+      // emit tlsError to the standard error event
+      socket.on('_tlsError', (err: Error) => this.emit('error', err, socket));
+
       if (configs.path && configs.path !== req.url.split('?')[0].split('#')[0]) {
         return this.lastUpgradeListener ? this.dropConnection(socket, 400, 'URL not supported') : null;
       }
@@ -148,7 +153,7 @@ export class WebSocketServer extends EventEmitter {
 
   private handleUpgrade(req: HTTP.IncomingMessage, socket: Socket): void {
     const secKey: any = req.headers['sec-websocket-key'];
-    // Cast socket as <any> so can get access to private properties to calculate a uws ticket.
+    // Cast socket as <any> so can get access to private properties to calculate a cws ticket.
     const socketAsAny: any = socket as any;
     const sslState: any = socketAsAny.ssl ? native.getSSLContext(socketAsAny.ssl) : null;
     const socketHandle: any = socketAsAny.ssl ? socketAsAny._parent._handle : socketAsAny._handle;

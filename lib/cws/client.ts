@@ -1,4 +1,4 @@
-import { EventEmitter } from '../emitter';
+import { getEmitter } from '../emitter';
 import { SendOptions, Listener, SocketAddress } from '../types';
 import { native, noop, DEFAULT_PAYLOAD_LIMIT, OPCODE_PING, OPCODE_BINARY, OPCODE_TEXT } from './shared';
 
@@ -27,8 +27,8 @@ native.client.group.onPong(clientGroup, (message: string | Buffer, webSocket: We
 native.client.group.onError(clientGroup, (webSocket: WebSocket): void => {
   process.nextTick((): void => {
     webSocket.emit('error', {
-      message: 'uWs client connection error',
-      stack: 'uWs client connection error'
+      message: 'cWs client connection error',
+      stack: 'cWs client connection error'
     });
   });
 });
@@ -42,7 +42,7 @@ native.client.group.onDisconnection(clientGroup, (newExternal: any, code: number
   native.clearUserData(newExternal);
 });
 
-export class WebSocket extends EventEmitter {
+export class WebSocket extends getEmitter() {
   public OPEN: number = 1;
   public CLOSED: number = 0;
 
@@ -71,6 +71,23 @@ export class WebSocket extends EventEmitter {
 
   public get readyState(): number {
     return this.external ? this.OPEN : this.CLOSED;
+  }
+
+  // browser interface
+  public set onopen(listener: Listener) {
+    this.on('open', listener);
+  }
+
+  public set onclose(listener: Listener) {
+    this.on('close', listener);
+  }
+
+  public set onerror(listener: Listener) {
+    this.on('error', listener);
+  }
+
+  public set onmessage(listener: Listener) {
+    this.on('message', listener);
   }
 
   // overload on function from super class
