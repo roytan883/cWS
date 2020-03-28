@@ -2,6 +2,8 @@
 
 build/
 targets/
+coverage/
+excludes/
 node_modules/
 
 build_log.txt

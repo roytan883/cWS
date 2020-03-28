@@ -7,11 +7,25 @@
 
 #if NODE_MAJOR_VERSION>=10
 #define NODE_WANT_INTERNALS 1
-#include "node_10+_headers/async_wrap.h"
-#include "node_10+_headers/tls_wrap.h"
+
+#if NODE_MAJOR_VERSION==10
+  #include "headers/10/tls_wrap.h"
+#endif
+
+#if NODE_MAJOR_VERSION==11
+  #include "headers/11/tls_wrap.h"
+#endif
+
+#if NODE_MAJOR_VERSION==12
+  #include "headers/12/tls_wrap.h"
+#endif
+
+#if NODE_MAJOR_VERSION==13
+  #include "headers/13/tls_wrap.h"
+#endif
+
 using BaseObject = node::BaseObject;
 using TLSWrap = node::TLSWrap;
-using SecureContext = node::crypto::SecureContext;
 class TLSWrapSSLGetter : public node::TLSWrap {
 public:
     void setSSL(const v8::FunctionCallbackInfo<v8::Value> &info){
@@ -25,25 +39,39 @@ public:
         info.GetReturnValue().Set(ext);
     }
 };
- #if defined(_MSC_VER)
-NO_RETURN void node::Assert(const char* const (*args)[4]) {
-  auto filename = (*args)[0];
-  auto linenum = (*args)[1];
-  auto message = (*args)[2];
-  auto function = (*args)[3];
-   char name[1024];
-  char title[1024] = "Node.js";
-  uv_get_process_title(title, sizeof(title));
-  snprintf(name, sizeof(name), "%s[%d]", title, uv_os_getpid());
-   fprintf(stderr, "%s: %s:%s:%s%s Assertion `%s' failed.\n",
-          name, filename, linenum, function, *function ? ":" : "", message);
-  fflush(stderr);
-  ABORT_NO_BACKTRACE();
-}
-#endif
- #undef NODE_WANT_INTERNALS
+
+// Fix windows not resolved symbol issue
+#if defined(_MSC_VER)
+  #if NODE_MAJOR_VERSION>10
+    [[noreturn]] void node::Assert(const node::AssertionInfo& info) {
+      char name[1024];
+      char title[1024] = "Node.js";
+      uv_get_process_title(title, sizeof(title));
+      snprintf(name, sizeof(name), "%s[%d]", title, uv_os_getpid());
+      fprintf(stderr, "%s: Assertion failed.\n", name);
+      fflush(stderr);
+      ABORT_NO_BACKTRACE();
+    }
+  #else
+    [[noreturn]] void node::Assert(const char* const (*args)[4]) {
+      auto filename = (*args)[0];
+      auto linenum = (*args)[1];
+      auto message = (*args)[2];
+      auto function = (*args)[3];
+      char name[1024];
+      char title[1024] = "Node.js";
+      uv_get_process_title(title, sizeof(title));
+      snprintf(name, sizeof(name), "%s[%d]", title, uv_os_getpid());
+      fprintf(stderr, "%s: %s:%s:%s%s Assertion `%s' failed.\n",
+              name, filename, linenum, function, *function ? ":" : "", message);
+      fflush(stderr);
+      ABORT_NO_BACKTRACE();
+    }
+  #endif
 #endif
 
+ #undef NODE_WANT_INTERNALS
+#endif
 
 using namespace std;
 using namespace v8;
@@ -71,12 +99,12 @@ class NativeString {
   String::Utf8Value *utf8Value = nullptr;
 
  public:
-  NativeString(const Local<Value> &value) {
+  NativeString(Isolate *isolate, const Local<Value> &value) {
     if (value->IsUndefined()) {
       data = nullptr;
       length = 0;
     } else if (value->IsString()) {
-      utf8Value = new (utf8ValueMemory) String::Utf8Value(value);
+      utf8Value = new (utf8ValueMemory) String::Utf8Value(isolate, value);
       data = (**utf8Value);
       length = utf8Value->length();
     } else if (node::Buffer::HasInstance(value)) {
@@ -119,7 +147,7 @@ struct GroupData {
 template <bool isServer>
 void createGroup(const FunctionCallbackInfo<Value> &args) {
   cWS::Group<isServer> *group = hub.createGroup<isServer>(
-      args[0]->IntegerValue(), args[1]->IntegerValue());
+      args[0].As<Integer>()->Value(), args[1].As<Integer>()->Value());
   group->setUserData(new GroupData);
   args.GetReturnValue().Set(External::New(args.GetIsolate(), group));
 }
@@ -145,10 +173,16 @@ inline cWS::WebSocket<isServer> *unwrapSocket(Local<External> external) {
 
 inline Local<Value> wrapMessage(const char *message, size_t length,
                                 cWS::OpCode opCode, Isolate *isolate) {
-  return opCode == cWS::OpCode::BINARY
-             ? (Local<Value>)ArrayBuffer::New(isolate, (char *)message, length)
-             : (Local<Value>)String::NewFromUtf8(isolate, message,
-                                                 String::kNormalString, length);
+
+  if (opCode == cWS::OpCode::BINARY) {
+    return (Local<Value>)ArrayBuffer::New(isolate, (char *)message, length);
+  }
+
+  #if NODE_MAJOR_VERSION >= 13
+    return (Local<Value>)String::NewFromUtf8(isolate, message, NewStringType::kNormal, length).ToLocalChecked();
+  #else
+    return (Local<Value>)String::NewFromUtf8(isolate, message, String::kNormalString, length);
+  #endif
 }
 
 template <bool isServer>
@@ -191,9 +225,17 @@ void getAddress(const FunctionCallbackInfo<Value> &args) {
   typename cWS::WebSocket<isServer>::Address address =
       unwrapSocket<isServer>(args[0].As<External>())->getAddress();
   Local<Array> array = Array::New(args.GetIsolate(), 3);
-  array->Set(0, Integer::New(args.GetIsolate(), address.port));
-  array->Set(1, String::NewFromUtf8(args.GetIsolate(), address.address));
-  array->Set(2, String::NewFromUtf8(args.GetIsolate(), address.family));
+
+  #if NODE_MAJOR_VERSION >= 13
+    array->Set(args.GetIsolate()->GetCurrentContext(), 0, Integer::New(args.GetIsolate(), address.port));
+    array->Set(args.GetIsolate()->GetCurrentContext(), 1, String::NewFromUtf8(args.GetIsolate(), address.address).ToLocalChecked());
+    array->Set(args.GetIsolate()->GetCurrentContext(), 2, String::NewFromUtf8(args.GetIsolate(), address.family).ToLocalChecked());
+  #else
+    array->Set(0, Integer::New(args.GetIsolate(), address.port));
+    array->Set(1, String::NewFromUtf8(args.GetIsolate(), address.address));
+    array->Set(2, String::NewFromUtf8(args.GetIsolate(), address.family));
+  #endif
+
   args.GetReturnValue().Set(array);
 }
 
@@ -229,8 +271,8 @@ void sendCallback(cWS::WebSocket<isServer> *webSocket, void *data,
 
 template <bool isServer>
 void send(const FunctionCallbackInfo<Value> &args) {
-  cWS::OpCode opCode = (cWS::OpCode)args[2]->IntegerValue();
-  NativeString nativeString(args[1]);
+  cWS::OpCode opCode = (cWS::OpCode)args[2].As<Integer>()->Value();
+  NativeString nativeString(args.GetIsolate(), args[1]);
 
   SendCallbackData *sc = nullptr;
   void (*callback)(cWS::WebSocket<isServer> *, void *, bool, void *) = nullptr;
@@ -242,7 +284,7 @@ void send(const FunctionCallbackInfo<Value> &args) {
     sc->isolate = args.GetIsolate();
   }
 
-  bool compress = args[4]->BooleanValue();
+  bool compress = args[4].As<Boolean>()->Value();
 
   unwrapSocket<isServer>(args[0].As<External>())
       ->send(nativeString.getData(), nativeString.getLength(), opCode, callback,
@@ -252,7 +294,7 @@ void send(const FunctionCallbackInfo<Value> &args) {
 void connect(const FunctionCallbackInfo<Value> &args) {
   cWS::Group<cWS::CLIENT> *clientGroup =
       (cWS::Group<cWS::CLIENT> *)args[0].As<External>()->Value();
-  NativeString uri(args[1]);
+  NativeString uri(args.GetIsolate(), args[1]);
   hub.connect(std::string(uri.getData(), uri.getLength()),
               new Persistent<Value>(args.GetIsolate(), args[2]), {}, 5000,
               clientGroup);
@@ -267,9 +309,10 @@ void upgrade(const FunctionCallbackInfo<Value> &args) {
   cWS::Group<cWS::SERVER> *serverGroup =
       (cWS::Group<cWS::SERVER> *)args[0].As<External>()->Value();
   Ticket *ticket = (Ticket *)args[1].As<External>()->Value();
-  NativeString secKey(args[2]);
-  NativeString extensions(args[3]);
-  NativeString subprotocol(args[4]);
+  Isolate *isolate = args.GetIsolate();
+  NativeString secKey(isolate, args[2]);
+  NativeString extensions(isolate, args[3]);
+  NativeString subprotocol(isolate, args[4]);
 
   // todo: move this check into core!
   if (ticket->fd != INVALID_SOCKET) {
@@ -289,11 +332,14 @@ void transfer(const FunctionCallbackInfo<Value> &args) {
   uv_handle_t *handle = nullptr;
   Ticket *ticket = new Ticket;
   if (args[0]->IsObject()) {
+    Isolate* isolate = args.GetIsolate();
+    Local<Context> context = isolate->GetCurrentContext();
+
     uv_fileno((handle = getTcpHandle(
-                   args[0]->ToObject()->GetAlignedPointerFromInternalField(0))),
+                   args[0]->ToObject(context).ToLocalChecked()->GetAlignedPointerFromInternalField(0))),
               (uv_os_fd_t *)&ticket->fd);
   } else {
-    ticket->fd = args[0]->IntegerValue();
+    ticket->fd = args[0].As<Integer>()->Value();
   }
 
   ticket->fd = dup(ticket->fd);
@@ -347,14 +393,14 @@ void onMessage(const FunctionCallbackInfo<Value> &args) {
                        cWS::WebSocket<isServer> *webSocket, const char *message,
                        size_t length, cWS::OpCode opCode) {
     if(length == 1 && message[0] == 65) {
-      // emit pong event is we get pong from the client
+      // emit pong event if we get pong from the client
       group->pongHandler(webSocket, nullptr, 0);
     } else {
       HandleScope hs(isolate);
       Local<Value> argv[] = {wrapMessage(message, length, opCode, isolate),
                             getDataV8(webSocket, isolate)};
       Local<Function>::New(isolate, *messageCallback)
-          ->Call(isolate->GetCurrentContext()->Global(), 2, argv);
+          ->Call(isolate->GetCurrentContext(), Null(isolate), 2, argv);
     }
   });
 }
@@ -448,9 +494,9 @@ void onError(const FunctionCallbackInfo<Value> &args) {
 
 template <bool isServer>
 void closeSocket(const FunctionCallbackInfo<Value> &args) {
-  NativeString nativeString(args[2]);
+  NativeString nativeString(args.GetIsolate(), args[2]);
   unwrapSocket<isServer>(args[0].As<External>())
-      ->close(args[1]->IntegerValue(), nativeString.getData(),
+      ->close(args[1].As<Integer>()->Value(), nativeString.getData(),
               nativeString.getLength());
 }
 
@@ -461,10 +507,10 @@ void terminateSocket(const FunctionCallbackInfo<Value> &args) {
 
 template <bool isServer>
 void closeGroup(const FunctionCallbackInfo<Value> &args) {
-  NativeString nativeString(args[2]);
+  NativeString nativeString(args.GetIsolate(), args[2]);
   cWS::Group<isServer> *group =
       (cWS::Group<isServer> *)args[0].As<External>()->Value();
-  group->close(args[1]->IntegerValue(), nativeString.getData(),
+  group->close(args[1].As<Integer>()->Value(), nativeString.getData(),
                nativeString.getLength());
 }
 
@@ -478,15 +524,15 @@ void broadcast(const FunctionCallbackInfo<Value> &args) {
   cWS::Group<isServer> *group =
       (cWS::Group<isServer> *)args[0].As<External>()->Value();
   cWS::OpCode opCode =
-      args[2]->BooleanValue() ? cWS::OpCode::BINARY : cWS::OpCode::TEXT;
-  NativeString nativeString(args[1]);
+      args[2].As<Boolean>()->Value() ? cWS::OpCode::BINARY : cWS::OpCode::TEXT;
+  NativeString nativeString(args.GetIsolate(), args[1]);
   group->broadcast(nativeString.getData(), nativeString.getLength(), opCode, false);
 }
 
 template <bool isServer>
 void prepareMessage(const FunctionCallbackInfo<Value> &args) {
-  cWS::OpCode opCode = (cWS::OpCode)args[1]->IntegerValue();
-  NativeString nativeString(args[0]);
+  cWS::OpCode opCode = (cWS::OpCode)args[1].As<Integer>()->Value();
+  NativeString nativeString(args.GetIsolate(), args[0]);
   args.GetReturnValue().Set(External::New(
       args.GetIsolate(),
       cWS::WebSocket<isServer>::prepareMessage(
@@ -515,9 +561,11 @@ void forEach(const FunctionCallbackInfo<Value> &args) {
   cWS::Group<cWS::SERVER> *group =
       (cWS::Group<cWS::SERVER> *)args[0].As<External>()->Value();
   Local<Function> cb = Local<Function>::Cast(args[1]);
-  group->forEach([isolate, &cb](cWS::WebSocket<cWS::SERVER> *webSocket) {
+  Local<Context> context = isolate->GetCurrentContext();
+
+  group->forEach([isolate, &cb, &context](cWS::WebSocket<cWS::SERVER> *webSocket) {
     Local<Value> argv[] = {getDataV8(webSocket, isolate)};
-    cb->Call(Null(isolate), 1, argv);
+    cb->Call(context, Null(isolate), 1, argv);
   });
 }
 
@@ -532,10 +580,10 @@ void startAutoPing(const FunctionCallbackInfo<Value> &args) {
   cWS::Group<cWS::SERVER> *group =
       (cWS::Group<cWS::SERVER> *)args[0].As<External>()->Value();
 
-  NativeString nativeString(args[2]);
+  NativeString nativeString(args.GetIsolate(), args[2]);
 
   group->startAutoPing(
-      args[1]->IntegerValue(),
+      args[1].As<Integer>()->Value(),
       nativeString.getData(), nativeString.getLength(), cWS::OpCode::BINARY);
 }
 
@@ -543,20 +591,29 @@ void startAutoPing(const FunctionCallbackInfo<Value> &args) {
 void getSSLContext(const FunctionCallbackInfo<Value> &args) {
     Isolate* isolate = args.GetIsolate();
     if(args.Length() < 1 || !args[0]->IsObject()){
-      isolate->ThrowException(Exception::TypeError(
-      String::NewFromUtf8(isolate, "Error: One object expected")));
+
+      #if NODE_MAJOR_VERSION >= 13
+        isolate->ThrowException(Exception::TypeError(
+          String::NewFromUtf8(isolate, "Error: One object expected").ToLocalChecked()));
+      #else
+        isolate->ThrowException(Exception::TypeError(
+          String::NewFromUtf8(isolate, "Error: One object expected")));
+      #endif
+
       return;
     }
+
     Local<Context> context = isolate->GetCurrentContext();
     Local<Object> obj = args[0]->ToObject(context).ToLocalChecked();
-#if NODE_MAJOR_VERSION < 10
-    Local<Value> ext = obj->Get(String::NewFromUtf8(isolate, "_external"));
-    args.GetReturnValue().Set(ext);
-#else
-    TLSWrapSSLGetter* tw;
-    ASSIGN_OR_RETURN_UNWRAP(&tw, obj);
-    tw->setSSL(args);
-#endif
+
+    #if NODE_MAJOR_VERSION < 10
+      Local<Value> ext = obj->Get(String::NewFromUtf8(isolate, "_external"));
+      args.GetReturnValue().Set(ext);
+    #else
+      TLSWrapSSLGetter* tw;
+      ASSIGN_OR_RETURN_UNWRAP(&tw, obj);
+      tw->setSSL(args);
+    #endif
 }
 
 void setNoop(const FunctionCallbackInfo<Value> &args) {
@@ -566,7 +623,7 @@ void setNoop(const FunctionCallbackInfo<Value> &args) {
 void listen(const FunctionCallbackInfo<Value> &args) {
   cWS::Group<cWS::SERVER> *group =
       (cWS::Group<cWS::SERVER> *)args[0].As<External>()->Value();
-  hub.listen(args[1]->IntegerValue(), nullptr, 0, group);
+  hub.listen(args[1].As<Integer>()->Value(), nullptr, 0, group);
 }
 
 template <bool isServer>
@@ -603,6 +660,10 @@ struct Namespace {
     NODE_SET_METHOD(group, "terminate", terminateGroup<isServer>);
     NODE_SET_METHOD(group, "broadcast", broadcast<isServer>);
 
-    object->Set(String::NewFromUtf8(isolate, "group"), group);
+    #if NODE_MAJOR_VERSION >= 13
+      object->Set(isolate->GetCurrentContext(), String::NewFromUtf8(isolate, "group").ToLocalChecked(), group);
+    #else
+      object->Set(String::NewFromUtf8(isolate, "group"), group);
+    #endif
   }
 };
